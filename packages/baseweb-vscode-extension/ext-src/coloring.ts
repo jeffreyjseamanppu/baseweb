@@ -5,9 +5,15 @@ export default (context: vscode.ExtensionContext) => {
   let timeout: NodeJS.Timer | undefined = undefined;
   let activeEditor = vscode.window.activeTextEditor;
 
-  // create a decorator type that we use to decorate small numbers
-  const getColorDecorationType = (coloringStyle: string, colorVal: string) =>
-    vscode.window.createTextEditorDecorationType({
+  const decorationTypeMap = {};
+
+  // Create a decorator type that we use to decorate small numbers
+  const getColorDecorationType = (coloringStyle: string, colorVal: string) => {
+    // Map decorators and do not create any new ones for the same color value
+    if (colorVal && decorationTypeMap[colorVal]) {
+      return decorationTypeMap[colorVal];
+    }
+    const decorationType = vscode.window.createTextEditorDecorationType({
       borderWidth:
         coloringStyle === 'border'
           ? '2px'
@@ -18,8 +24,10 @@ export default (context: vscode.ExtensionContext) => {
       borderColor: colorVal,
       backgroundColor:
         coloringStyle === 'background' ? colorVal : 'transparent',
-      opacity: 0.5,
     });
+    decorationTypeMap[colorVal] = decorationType;
+    return decorationType;
+  };
 
   function updateDecorations() {
     if (!activeEditor) {
@@ -33,18 +41,29 @@ export default (context: vscode.ExtensionContext) => {
     }
     const themeMode = workspaceConfig.get('theme.coloring.source');
     const theme = themeMode === 'Light' ? LightTheme : DarkTheme;
-    const coloringStyle = workspaceConfig.get('theme.coloring.style');
+    const coloringStyle: string =
+      workspaceConfig.get('theme.coloring.style') || '';
 
-    const regEx = /colors\.\w+/g;
+    const regEx = /(^|\W)(colors\.\w+)/gm;
     const text = activeEditor.document.getText();
     let match;
+    // Find matches and decorate accordingly
     while ((match = regEx.exec(text))) {
-      // exclude the `colors.` part
-      const startPos = activeEditor.document.positionAt(match.index + 7);
-      const endPos = activeEditor.document.positionAt(
-        match.index + match[0].length,
+      const themeColorVal: string | undefined = theme.colors[match[2].slice(7)];
+      // Do not decorate if the color key is not present in the theme object
+      if (!themeColorVal) {
+        continue;
+      }
+      // Start position excluding the `colors.` part
+      const startPos = activeEditor.document.positionAt(
+        match.index + match[1].length + 7,
       );
-      const colorVal = theme.colors[match[0].slice(7)] || 'transparent';
+      const endPos = activeEditor.document.positionAt(
+        match.index + match[1].length + match[2].length,
+      );
+      // It should never get to here if `!themeColorVal`
+      // but adding a default `transparent` to satisfy types
+      const colorVal: string = themeColorVal || 'transparent';
       const decoration = {
         range: new vscode.Range(startPos, endPos),
         hoverMessage: `${colorVal} | ${themeMode}Theme`,
@@ -61,7 +80,7 @@ export default (context: vscode.ExtensionContext) => {
       clearTimeout(timeout);
       timeout = undefined;
     }
-    timeout = setTimeout(updateDecorations, 500);
+    timeout = setTimeout(updateDecorations, 200);
   }
 
   if (activeEditor) {
